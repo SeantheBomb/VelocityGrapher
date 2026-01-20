@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AddForce vs AddImpulse — 2D Motion Sandbox</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; }
+    header { padding: 12px 16px; border-bottom: 1px solid #ddd; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;}
+    header h1 { font-size: 16px; margin: 0; }
+    header .hint { font-size: 13px; opacity: .8; }
+    main { display: grid; grid-template-columns: 420px 1fr; gap: 12px; padding: 12px 16px; }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    label { font-size: 12px; display:block; margin-bottom: 4px; opacity: .85; }
+    input, select, button, textarea {
+      font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid #ccc;
+    }
+    input[type="number"] { width: 110px; }
+    input.small { width: 88px; }
+    input.tiny { width: 72px; }
+    button { cursor: pointer; background: #fff; }
+    button.primary { background: #111; color: #fff; border-color:#111; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px 6px; text-align: left; vertical-align: middle; }
+    th { font-size: 12px; opacity: .8; }
+    td .mini { width: 72px; }
+    td .micro { width: 62px; }
+    td select { padding: 6px 6px; }
+    .split { display:grid; grid-template-columns: 1fr; gap:12px; }
+    .canvwrap { display:grid; grid-template-columns: 1fr; gap:10px; }
+    canvas { width: 100%; height: 340px; border: 1px solid #ddd; border-radius: 10px; background:#fff; }
+    #graph { height: 240px; }
+    .footer-note { font-size: 12px; opacity: .8; line-height: 1.35; }
+    .pill { display:inline-block; padding: 2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; }
+    .status { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .status code { font-size: 12px; background:#f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    textarea { width: 100%; height: 86px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    details summary { cursor:pointer; user-select:none; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>AddForce vs AddImpulse — 2D Motion Sandbox</h1>
+  <span class="hint">Unity-ish FixedUpdate simulation • continuous forces vs instant impulses • trajectory + graphs</span>
+</header>
+
+<main>
+  <!-- Controls -->
+  <section class="card split">
+    <div>
+      <div class="row">
+        <div>
+          <label>Mass (kg)</label>
+          <input id="mass" type="number" step="0.1" value="1.0" />
+        </div>
+        <div>
+          <label>Linear Drag (1/s)</label>
+          <input id="drag" type="number" step="0.05" value="0.0" />
+        </div>
+        <div>
+          <label>Gravity X</label>
+          <input id="gx" class="small" type="number" step="0.1" value="0.0" />
+        </div>
+        <div>
+          <label>Gravity Y</label>
+          <input id="gy" class="small" type="number" step="0.1" value="-9.81" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Fixed Delta Time (s)</label>
+          <input id="dt" type="number" step="0.001" value="0.02" />
+        </div>
+        <div>
+          <label>Duration (s)</label>
+          <input id="duration" type="number" step="0.1" value="5.0" />
+        </div>
+        <div>
+          <label>Initial Pos (x,y)</label>
+          <div class="row" style="gap:6px;">
+            <input id="p0x" class="tiny" type="number" step="0.1" value="0.0" />
+            <input id="p0y" class="tiny" type="number" step="0.1" value="0.0" />
+          </div>
+        </div>
+        <div>
+          <label>Initial Vel (x,y)</label>
+          <div class="row" style="gap:6px;">
+            <input id="v0x" class="tiny" type="number" step="0.1" value="0.0" />
+            <input id="v0y" class="tiny" type="number" step="0.1" value="0.0" />
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="simulate" class="primary">Simulate</button>
+        <button id="play" disabled>Play</button>
+        <button id="pause" disabled>Pause</button>
+        <button id="resetView">Reset View</button>
+        <span class="pill" id="modePill">Mode: Semi-Implicit Euler (Unity-ish)</span>
+      </div>
+
+      <div class="status" style="margin-top:10px;">
+        <span>Steps: <code id="steps">—</code></span>
+        <span>t: <code id="treadout">—</code></span>
+        <span>pos: <code id="preadout">—</code></span>
+        <span>vel: <code id="vreadout">—</code></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="row" style="justify-content:space-between;">
+        <strong style="font-size:13px;">Events</strong>
+        <div class="row" style="gap:8px;">
+          <button id="addForce">+ Force</button>
+          <button id="addImpulse">+ Impulse</button>
+          <button id="preset1">Preset: Thrust + Jump</button>
+          <button id="clearEvents">Clear</button>
+        </div>
+      </div>
+
+      <div style="margin-top:8px; overflow:auto;">
+        <table id="events">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>t0</th>
+              <th>t1</th>
+              <th>X</th>
+              <th>Y</th>
+              <th>Mode</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <details style="margin-top:10px;">
+        <summary><strong style="font-size:13px;">Import / Export events (JSON)</strong></summary>
+        <div style="margin-top:8px;">
+          <textarea id="jsonBox" placeholder='Click "Export" to fill this, or paste JSON then click "Import".'></textarea>
+          <div class="row" style="margin-top:8px;">
+            <button id="export">Export</button>
+            <button id="import">Import</button>
+          </div>
+        </div>
+      </details>
+
+      <p class="footer-note" style="margin-top:10px;">
+        Unity mapping (simplified):
+        <br>• <b>AddForce</b> (Force): Δv = (F / m) · dt each fixed step while active.
+        <br>• <b>AddForce</b> (Acceleration): Δv = a · dt (ignores mass).
+        <br>• <b>AddImpulse</b> (Impulse): Δv = (J / m) applied instantly at time t.
+        <br>• <b>AddImpulse</b> (VelocityChange): Δv = Δv directly (ignores mass).
+        <br><span style="opacity:.8;">No collisions/rotation; optional linear drag is a simple exponential-ish damping.</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- Visuals -->
+  <section class="card canvwrap">
+    <div>
+      <strong style="font-size:13px;">World View (trajectory + playback)</strong>
+      <canvas id="world" width="1200" height="700"></canvas>
+      <div class="footer-note">
+        Mouse: drag to pan • Wheel: zoom • Simulation uses meters. Axes are drawn through (0,0).
+      </div>
+    </div>
+    <div>
+      <strong style="font-size:13px;">Graphs</strong>
+      <canvas id="graph" width="1200" height="520"></canvas>
+      <div class="footer-note">
+        Graphs: x(t), y(t), speed(t). Click legend to toggle series.
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  // ---------- State ----------
+  const ui = {
+    mass: byId("mass"),
+    drag: byId("drag"),
+    gx: byId("gx"),
+    gy: byId("gy"),
+    dt: byId("dt"),
+    duration: byId("duration"),
+    p0x: byId("p0x"), p0y: byId("p0y"),
+    v0x: byId("v0x"), v0y: byId("v0y"),
+    simulate: byId("simulate"),
+    play: byId("play"),
+    pause: byId("pause"),
+    resetView: byId("resetView"),
+    addForce: byId("addForce"),
+    addImpulse: byId("addImpulse"),
+    preset1: byId("preset1"),
+    clearEvents: byId("clearEvents"),
+    eventsTable: byId("events").querySelector("tbody"),
+    steps: byId("steps"),
+    treadout: byId("treadout"),
+    preadout: byId("preadout"),
+    vreadout: byId("vreadout"),
+    jsonBox: byId("jsonBox"),
+    exportBtn: byId("export"),
+    importBtn: byId("import"),
+  };
+
+  const world = {
+    canvas: byId("world"),
+    ctx: byId("world").getContext("2d"),
+    panX: 0,
+    panY: 0,
+    zoom: 60, // px per meter
+  };
+
+  const graph = {
+    canvas: byId("graph"),
+    ctx: byId("graph").getContext("2d"),
+    showX: true,
+    showY: true,
+    showSpeed: true,
+  };
+
+  /** @type {Array<{id:string,type:"force"|"impulse", t0:number, t1:number, x:number, y:number, mode:string}>} */
+  let events = [];
+
+  /** @type {null | {t:number[], x:number[], y:number[], vx:number[], vy:number[]}} */
+  let sim = null;
+
+  let playback = {
+    playing: false,
+    t: 0,
+    idx: 0,
+    lastRAF: 0,
+    speed: 1.0, // real-time
+  };
+
+  // ---------- Helpers ----------
+  function byId(id){ return document.getElementById(id); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
+  function uid(){ return Math.random().toString(16).slice(2,10); }
+  function safeNum(input, fallback=0){
+    const v = Number(input);
+    return Number.isFinite(v) ? v : fallback;
+  }
+
+  // ---------- Event Table UI ----------
+  function addEventRow(evt){
+    const tr = document.createElement("tr");
+    tr.dataset.id = evt.id;
+
+    const typeCell = document.createElement("td");
+    typeCell.textContent = evt.type === "force" ? "Force" : "Impulse";
+    tr.appendChild(typeCell);
+
+    const t0Cell = document.createElement("td");
+    const t0 = mkNum(evt.t0, evt.type === "force" ? "micro" : "mini");
+    t0Cell.appendChild(t0);
+    tr.appendChild(t0Cell);
+
+    const t1Cell = document.createElement("td");
+    const t1 = mkNum(evt.t1, "micro");
+    t1.disabled = evt.type !== "force";
+    t1Cell.appendChild(t1);
+    tr.appendChild(t1Cell);
+
+    const xCell = document.createElement("td");
+    const x = mkNum(evt.x, "mini");
+    xCell.appendChild(x);
+    tr.appendChild(xCell);
+
+    const yCell = document.createElement("td");
+    const y = mkNum(evt.y, "mini");
+    yCell.appendChild(y);
+    tr.appendChild(yCell);
+
+    const modeCell = document.createElement("td");
+    const mode = document.createElement("select");
+    if (evt.type === "force"){
+      mode.innerHTML = `
+        <option value="Force">Force</option>
+        <option value="Acceleration">Acceleration</option>
+      `;
+    } else {
+      mode.innerHTML = `
+        <option value="Impulse">Impulse</option>
+        <option value="VelocityChange">VelocityChange</option>
+      `;
+    }
+    mode.value = evt.mode;
+    modeCell.appendChild(mode);
+    tr.appendChild(modeCell);
+
+    const delCell = document.createElement("td");
+    const del = document.createElement("button");
+    del.textContent = "✕";
+    del.title = "Delete";
+    del.onclick = () => {
+      events = events.filter(e => e.id !== evt.id);
+      tr.remove();
+      redrawAll();
+    };
+    delCell.appendChild(del);
+    tr.appendChild(delCell);
+
+    // Wire updates
+    const sync = () => {
+      evt.t0 = safeNum(t0.value, evt.t0);
+      evt.t1 = safeNum(t1.value, evt.t1);
+      evt.x  = safeNum(x.value, evt.x);
+      evt.y  = safeNum(y.value, evt.y);
+      evt.mode = mode.value;
+
+      // Keep sane
+      evt.t0 = Math.max(0, evt.t0);
+      if (evt.type === "force") evt.t1 = Math.max(evt.t0, evt.t1);
+      redrawAll();
+    };
+    [t0,t1,x,y,mode].forEach(el => el.addEventListener("input", sync));
+    ui.eventsTable.appendChild(tr);
+  }
+
+  function mkNum(v, cls){
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.step = "0.01";
+    inp.value = String(v);
+    inp.className = cls;
+    return inp;
+  }
+
+  function rebuildEventTable(){
+    ui.eventsTable.innerHTML = "";
+    for (const e of events) addEventRow(e);
+  }
+
+  // ---------- Simulation ----------
+  function simulate(){
+    const mass = Math.max(1e-6, safeNum(ui.mass.value, 1));
+    const drag = Math.max(0, safeNum(ui.drag.value, 0));
+    const gx = safeNum(ui.gx.value, 0);
+    const gy = safeNum(ui.gy.value, -9.81);
+    const dt = clamp(safeNum(ui.dt.value, 0.02), 1e-4, 0.2);
+    const T = Math.max(0.01, safeNum(ui.duration.value, 5));
+
+    const p0x = safeNum(ui.p0x.value, 0);
+    const p0y = safeNum(ui.p0y.value, 0);
+    const v0x = safeNum(ui.v0x.value, 0);
+    const v0y = safeNum(ui.v0y.value, 0);
+
+    const steps = Math.floor(T / dt) + 1;
+
+    const t = new Array(steps);
+    const x = new Array(steps);
+    const y = new Array(steps);
+    const vx = new Array(steps);
+    const vy = new Array(steps);
+
+    // Initial
+    t[0] = 0; x[0] = p0x; y[0] = p0y; vx[0] = v0x; vy[0] = v0y;
+
+    // Pre-sort impulses for quick lookups
+    const impulses = events
+      .filter(e => e.type === "impulse")
+      .slice()
+      .sort((a,b) => a.t0 - b.t0);
+
+    let impulseIdx = 0;
+
+    for (let i=1; i<steps; i++){
+      const time = i * dt;
+
+      // Start from previous state
+      let px = x[i-1], py = y[i-1];
+      let vvx = vx[i-1], vvy = vy[i-1];
+
+      // Apply impulses that happen within (time-dt, time] like Unity fixed ticks.
+      // This is a pragmatic discretization: if t0 falls in this step, apply once.
+      while (impulseIdx < impulses.length && impulses[impulseIdx].t0 <= time + 1e-9){
+        const imp = impulses[impulseIdx];
+        if (imp.t0 > time - dt - 1e-9){
+          if (imp.mode === "VelocityChange"){
+            vvx += imp.x;
+            vvy += imp.y;
+          } else { // Impulse
+            vvx += (imp.x / mass);
+            vvy += (imp.y / mass);
+          }
+        }
+        impulseIdx++;
+      }
+
+      // Sum active forces for this step
+      let ax = gx;
+      let ay = gy;
+
+      for (const e of events){
+        if (e.type !== "force") continue;
+        if (time < e.t0 - 1e-9 || time > e.t1 + 1e-9) continue;
+
+        if (e.mode === "Acceleration"){
+          ax += e.x;
+          ay += e.y;
+        } else { // Force
+          ax += (e.x / mass);
+          ay += (e.y / mass);
+        }
+      }
+
+      // Linear drag (very simplified): a_drag = -drag * v
+      // (Unity's drag is not exactly this, but this is a decent "feel" emulator.)
+      ax += -drag * vvx;
+      ay += -drag * vvy;
+
+      // Semi-implicit Euler (common in physics engines): v <- v + a*dt, p <- p + v*dt
+      vvx += ax * dt;
+      vvy += ay * dt;
+
+      px += vvx * dt;
+      py += vvy * dt;
+
+      t[i] = time;
+      x[i] = px; y[i] = py; vx[i] = vvx; vy[i] = vvy;
+    }
+
+    sim = { t, x, y, vx, vy };
+
+    ui.steps.textContent = String(steps);
+    playback.playing = false;
+    playback.t = 0;
+    playback.idx = 0;
+    ui.play.disabled = false;
+    ui.pause.disabled = true;
+
+    // Auto fit view to path
+    fitWorldToTrajectory();
+    redrawAll();
+    updateReadouts(0);
+  }
+
+  // ---------- Drawing ----------
+  function redrawAll(){
+    drawWorld();
+    drawGraph();
+  }
+
+  function worldToScreen(px, py){
+    const c = world.canvas;
+    const cx = c.width/2 + world.panX;
+    const cy = c.height/2 + world.panY;
+    return {
+      x: cx + px * world.zoom,
+      y: cy - py * world.zoom,
+    };
+  }
+
+  function drawWorld(){
+    const ctx = world.ctx;
+    const c = world.canvas;
+    ctx.clearRect(0,0,c.width,c.height);
+
+    // Grid
+    ctx.save();
+    ctx.lineWidth = 1;
+
+    const gridStepMeters = pickNiceGridStep(1/world.zoom * 120); // heuristic
+    const stepPx = gridStepMeters * world.zoom;
+
+    const origin = worldToScreen(0,0);
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "#bbb";
+
+    // vertical grid lines
+    for (let x = origin.x % stepPx; x < c.width; x += stepPx){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,c.height); ctx.stroke();
+    }
+    // horizontal grid lines
+    for (let y = origin.y % stepPx; y < c.height; y += stepPx){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(c.width,y); ctx.stroke();
+    }
+
+    // Axes
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = "#444";
+    ctx.beginPath(); ctx.moveTo(0, origin.y); ctx.lineTo(c.width, origin.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(origin.x, 0); ctx.lineTo(origin.x, c.height); ctx.stroke();
+
+    ctx.restore();
+
+    // Trajectory
+    if (sim){
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#111";
+      ctx.beginPath();
+      for (let i=0; i<sim.t.length; i++){
+        const s = worldToScreen(sim.x[i], sim.y[i]);
+        if (i===0) ctx.moveTo(s.x,s.y);
+        else ctx.lineTo(s.x,s.y);
+      }
+      ctx.stroke();
+
+      // Draw impulse markers
+      for (const e of events){
+        if (e.type !== "impulse") continue;
+        const idx = timeToIndex(e.t0);
+        if (idx === null) continue;
+        const s = worldToScreen(sim.x[idx], sim.y[idx]);
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Playback body
+      const i = clamp(playback.idx, 0, sim.t.length-1);
+      const p = worldToScreen(sim.x[i], sim.y[i]);
+      ctx.fillStyle = "#111";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 8, 0, Math.PI*2);
+      ctx.fill();
+
+      // velocity arrow
+      const vScale = 0.25; // meters per (m/s) in arrow length
+      const vx = sim.vx[i], vy = sim.vy[i];
+      const q = worldToScreen(sim.x[i] + vx*vScale, sim.y[i] + vy*vScale);
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 2;
+      drawArrow(ctx, p.x, p.y, q.x, q.y);
+
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.fillStyle = "#111";
+      ctx.globalAlpha = 0.6;
+      ctx.fillText("Click Simulate to generate a trajectory.", 16, 24);
+      ctx.restore();
+    }
+
+    // Legend
+    ctx.save();
+    ctx.fillStyle = "#111";
+    ctx.globalAlpha = 0.85;
+    ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.fillText("Trajectory", 16, c.height-16);
+    ctx.restore();
+  }
+
+  function pickNiceGridStep(targetMeters){
+    // pick from 0.1,0.2,0.5,1,2,5,10,20,50...
+    const bases = [0.1,0.2,0.5,1,2,5];
+    const pow = Math.pow(10, Math.floor(Math.log10(targetMeters)));
+    for (const b of bases){
+      const v = b*pow;
+      if (v >= targetMeters) return v;
+    }
+    return 10*pow;
+  }
+
+  function drawArrow(ctx, x1,y1,x2,y2){
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2,y2);
+    ctx.stroke();
+    const ang = Math.atan2(y2-y1, x2-x1);
+    const head = 10;
+    ctx.beginPath();
+    ctx.moveTo(x2,y2);
+    ctx.lineTo(x2 - head*Math.cos(ang - 0.5), y2 - head*Math.sin(ang - 0.5));
+    ctx.lineTo(x2 - head*Math.cos(ang + 0.5), y2 - head*Math.sin(ang + 0.5));
+    ctx.closePath();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+  }
+
+  function drawGraph(){
+    const ctx = graph.ctx;
+    const c = graph.canvas;
+    ctx.clearRect(0,0,c.width,c.height);
+
+    // Frame
+    ctx.save();
+    ctx.strokeStyle = "#ddd";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5,0.5,c.width-1,c.height-1);
+    ctx.restore();
+
+    if (!sim){
+      ctx.save();
+      ctx.fillStyle = "#111";
+      ctx.globalAlpha = 0.6;
+      ctx.fillText("Simulate to see graphs.", 16, 24);
+      ctx.restore();
+      return;
+    }
+
+    const padL = 60, padR = 20, padT = 18, padB = 46;
+    const W = c.width - padL - padR;
+    const H = c.height - padT - padB;
+
+    // Data series
+    const speed = sim.vx.map((vx,i)=>Math.hypot(vx, sim.vy[i]));
+
+    // Determine y-range from enabled series
+    let yMin = Infinity, yMax = -Infinity;
+    const consider = [];
+    if (graph.showX) consider.push(sim.x);
+    if (graph.showY) consider.push(sim.y);
+    if (graph.showSpeed) consider.push(speed);
+    for (const arr of consider){
+      for (const v of arr){ yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
+    }
+    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)){ yMin=0; yMax=1; }
+    if (Math.abs(yMax-yMin) < 1e-6){ yMin -= 1; yMax += 1; }
+
+    const tMin = sim.t[0], tMax = sim.t[sim.t.length-1];
+
+    function X(t){ return padL + (t - tMin)/(tMax - tMin) * W; }
+    function Y(v){ return padT + (1 - (v - yMin)/(yMax - yMin)) * H; }
+
+    // Grid + axes labels
+    ctx.save();
+    ctx.strokeStyle = "#eee";
+    ctx.fillStyle = "#111";
+    ctx.globalAlpha = 1;
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+
+    const yTicks = 5;
+    for (let i=0; i<=yTicks; i++){
+      const a = i/yTicks;
+      const v = yMin + (1-a)*(yMax-yMin);
+      const y = padT + a*H;
+      ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+W,y); ctx.stroke();
+      ctx.globalAlpha = 0.85;
+      ctx.fillText(v.toFixed(2), 8, y+4);
+      ctx.globalAlpha = 1;
+    }
+
+    const xTicks = 6;
+    for (let i=0; i<=xTicks; i++){
+      const a = i/xTicks;
+      const tt = tMin + a*(tMax - tMin);
+      const x = padL + a*W;
+      ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,padT+H); ctx.stroke();
+      ctx.globalAlpha = 0.85;
+      ctx.fillText(tt.toFixed(2)+"s", x-14, padT+H+22);
+      ctx.globalAlpha = 1;
+    }
+
+    // Border
+    ctx.strokeStyle = "#bbb";
+    ctx.strokeRect(padL+0.5, padT+0.5, W-1, H-1);
+    ctx.restore();
+
+    // Draw series (distinct styles without hardcoding colors: we vary dash patterns)
+    const series = [];
+    if (graph.showX) series.push({ name:"x(t)", arr: sim.x, dash: [] });
+    if (graph.showY) series.push({ name:"y(t)", arr: sim.y, dash: [6,4] });
+    if (graph.showSpeed) series.push({ name:"speed(t)", arr: speed, dash: [2,4] });
+
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#111";
+
+    for (const s of series){
+      ctx.setLineDash(s.dash);
+      ctx.beginPath();
+      for (let i=0; i<sim.t.length; i++){
+        const xx = X(sim.t[i]);
+        const yy = Y(s.arr[i]);
+        if (i===0) ctx.moveTo(xx,yy);
+        else ctx.lineTo(xx,yy);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Playback vertical line
+    ctx.save();
+    const px = X(sim.t[playback.idx]);
+    ctx.strokeStyle = "#111";
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px, padT);
+    ctx.lineTo(px, padT+H);
+    ctx.stroke();
+    ctx.restore();
+
+    // Legend (clickable)
+    const legend = [
+      { key:"showX", label:"x(t)", dash:[] },
+      { key:"showY", label:"y(t)", dash:[6,4] },
+      { key:"showSpeed", label:"speed(t)", dash:[2,4] },
+    ];
+
+    // Store legend hitboxes
+    graph._legendBoxes = [];
+    let lx = padL, ly = c.height - 18;
+
+    ctx.save();
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.fillStyle = "#111";
+    ctx.strokeStyle = "#111";
+    for (const item of legend){
+      const on = graph[item.key];
+      const w = ctx.measureText(item.label).width;
+
+      // swatch
+      ctx.globalAlpha = on ? 1 : 0.25;
+      ctx.lineWidth = 2;
+      ctx.setLineDash(item.dash);
+      ctx.beginPath();
+      ctx.moveTo(lx, ly-4);
+      ctx.lineTo(lx+24, ly-4);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = on ? 1 : 0.45;
+      ctx.fillText(item.label, lx+30, ly);
+      graph._legendBoxes.push({ x: lx-4, y: ly-16, w: 34+w, h: 18, key: item.key });
+      lx += 44 + w;
+    }
+    ctx.restore();
+  }
+
+  function timeToIndex(tt){
+    if (!sim) return null;
+    // closest index
+    const dt = sim.t[1] - sim.t[0];
+    const i = Math.round(tt / dt);
+    return clamp(i, 0, sim.t.length-1);
+  }
+
+  function updateReadouts(i){
+    if (!sim) {
+      ui.treadout.textContent = "—";
+      ui.preadout.textContent = "—";
+      ui.vreadout.textContent = "—";
+      return;
+    }
+    i = clamp(i, 0, sim.t.length-1);
+    ui.treadout.textContent = fmt(sim.t[i]);
+    ui.preadout.textContent = `(${fmt(sim.x[i])}, ${fmt(sim.y[i])})`;
+    ui.vreadout.textContent = `(${fmt(sim.vx[i])}, ${fmt(sim.vy[i])})`;
+  }
+
+  // ---------- View fitting & interaction ----------
+  function fitWorldToTrajectory(){
+    if (!sim) return;
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for (let i=0;i<sim.x.length;i++){
+      minX = Math.min(minX, sim.x[i]); maxX = Math.max(maxX, sim.x[i]);
+      minY = Math.min(minY, sim.y[i]); maxY = Math.max(maxY, sim.y[i]);
+    }
+    // Pad
+    const pad = 0.5;
+    minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+
+    const w = world.canvas.width, h = world.canvas.height;
+    const spanX = Math.max(1e-6, maxX-minX);
+    const spanY = Math.max(1e-6, maxY-minY);
+
+    const zoomX = (w*0.8)/spanX;
+    const zoomY = (h*0.8)/spanY;
+    world.zoom = clamp(Math.min(zoomX, zoomY), 10, 400);
+
+    // Center on mid
+    const midX = (minX+maxX)/2;
+    const midY = (minY+maxY)/2;
+    const o = worldToScreen(midX, midY);
+    const cx = w/2, cy = h/2;
+    world.panX += (cx - o.x);
+    world.panY += (cy - o.y);
+  }
+
+  function resetView(){
+    world.panX = 0;
+    world.panY = 0;
+    world.zoom = 60;
+    if (sim) fitWorldToTrajectory();
+    redrawAll();
+  }
+
+  // Pan/zoom
+  let dragging=false, lastMX=0,lastMY=0;
+  world.canvas.addEventListener("mousedown", (e)=>{
+    dragging=true; lastMX=e.clientX; lastMY=e.clientY;
+  });
+  window.addEventListener("mouseup", ()=> dragging=false);
+  window.addEventListener("mousemove", (e)=>{
+    if (!dragging) return;
+    const dx = e.clientX - lastMX;
+    const dy = e.clientY - lastMY;
+    lastMX=e.clientX; lastMY=e.clientY;
+    world.panX += dx;
+    world.panY += dy;
+    redrawAll();
+  });
+  world.canvas.addEventListener("wheel", (e)=>{
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    const factor = (delta > 0) ? 0.9 : 1.1;
+
+    // Zoom around cursor
+    const rect = world.canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (world.canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (world.canvas.height / rect.height);
+
+    const before = screenToWorld(mx, my);
+    world.zoom = clamp(world.zoom * factor, 5, 800);
+    const after = screenToWorld(mx, my);
+
+    // Adjust pan so cursor stays over same world point
+    const dx = (after.x - before.x) * world.zoom;
+    const dy = (after.y - before.y) * world.zoom;
+    world.panX += dx;
+    world.panY -= dy;
+
+    redrawAll();
+  }, { passive:false });
+
+  function screenToWorld(sx, sy){
+    const c = world.canvas;
+    const cx = c.width/2 + world.panX;
+    const cy = c.height/2 + world.panY;
+    return {
+      x: (sx - cx) / world.zoom,
+      y: (cy - sy) / world.zoom,
+    };
+  }
+
+  // Graph legend click toggles
+  graph.canvas.addEventListener("click", (e)=>{
+    if (!graph._legendBoxes) return;
+    const rect = graph.canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (graph.canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (graph.canvas.height / rect.height);
+    for (const b of graph._legendBoxes){
+      if (mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h){
+        graph[b.key] = !graph[b.key];
+        redrawAll();
+        break;
+      }
+    }
+  });
+
+  // ---------- Playback ----------
+  function play(){
+    if (!sim) return;
+    playback.playing = true;
+    ui.play.disabled = true;
+    ui.pause.disabled = false;
+    playback.lastRAF = performance.now();
+    requestAnimationFrame(tick);
+  }
+  function pause(){
+    playback.playing = false;
+    ui.play.disabled = !sim ? true : false;
+    ui.pause.disabled = true;
+  }
+  function tick(now){
+    if (!playback.playing || !sim) return;
+    const dtReal = (now - playback.lastRAF) / 1000;
+    playback.lastRAF = now;
+
+    const simDt = (sim.t[1] - sim.t[0]);
+    const advance = dtReal * playback.speed;
+    playback.t += advance;
+
+    const maxT = sim.t[sim.t.length-1];
+    if (playback.t >= maxT){
+      playback.t = maxT;
+      playback.idx = sim.t.length-1;
+      updateReadouts(playback.idx);
+      redrawAll();
+      pause();
+      return;
+    }
+
+    playback.idx = Math.floor(playback.t / simDt);
+    updateReadouts(playback.idx);
+    redrawAll();
+    requestAnimationFrame(tick);
+  }
+
+  // ---------- JSON import/export ----------
+  function exportJSON(){
+    const cleaned = events.map(e => ({
+      type: e.type,
+      t0: e.t0,
+      t1: e.t1,
+      x: e.x,
+      y: e.y,
+      mode: e.mode,
+    }));
+    ui.jsonBox.value = JSON.stringify(cleaned, null, 2);
+  }
+
+  function importJSON(){
+    try{
+      const arr = JSON.parse(ui.jsonBox.value);
+      if (!Array.isArray(arr)) throw new Error("JSON must be an array");
+      events = arr.map(o => ({
+        id: uid(),
+        type: (o.type === "force" || o.type === "impulse") ? o.type : "force",
+        t0: Number(o.t0 ?? 0),
+        t1: Number(o.t1 ?? (o.type==="force" ? 1 : 0)),
+        x: Number(o.x ?? 0),
+        y: Number(o.y ?? 0),
+        mode: String(o.mode ?? (o.type==="impulse" ? "Impulse" : "Force")),
+      }));
+      // normalize
+      for (const e of events){
+        e.t0 = Math.max(0, e.t0);
+        if (e.type === "force") e.t1 = Math.max(e.t0, e.t1);
+        else e.t1 = e.t0;
+        if (e.type === "force" && !["Force","Acceleration"].includes(e.mode)) e.mode = "Force";
+        if (e.type === "impulse" && !["Impulse","VelocityChange"].includes(e.mode)) e.mode = "Impulse";
+      }
+      rebuildEventTable();
+      redrawAll();
+    } catch(err){
+      alert("Import failed: " + err.message);
+    }
+  }
+
+  // ---------- Presets ----------
+  function presetThrustJump(){
+    // A simple "rocket thrust then jump impulse" example
+    events = [
+      { id: uid(), type:"force", t0:0.0, t1:2.5, x:12.0, y:0.0, mode:"Force" },      // thrust right
+      { id: uid(), type:"force", t0:0.0, t1:5.0, x:0.0,  y:0.0, mode:"Force" },      // placeholder
+      { id: uid(), type:"impulse", t0:0.75, t1:0.75, x:0.0, y:6.5, mode:"Impulse" }, // jump impulse up
+    ];
+    rebuildEventTable();
+    redrawAll();
+  }
+
+  // ---------- Wire up UI buttons ----------
+  ui.simulate.onclick = simulate;
+  ui.play.onclick = play;
+  ui.pause.onclick = pause;
+  ui.resetView.onclick = resetView;
+
+  ui.addForce.onclick = () => {
+    const e = { id: uid(), type:"force", t0:0.0, t1:1.0, x:0.0, y:10.0, mode:"Force" };
+    events.push(e);
+    addEventRow(e);
+    redrawAll();
+  };
+
+  ui.addImpulse.onclick = () => {
+    const e = { id: uid(), type:"impulse", t0:0.5, t1:0.5, x:0.0, y:5.0, mode:"Impulse" };
+    events.push(e);
+    addEventRow(e);
+    redrawAll();
+  };
+
+  ui.preset1.onclick = presetThrustJump;
+
+  ui.clearEvents.onclick = () => {
+    events = [];
+    rebuildEventTable();
+    redrawAll();
+  };
+
+  ui.exportBtn.onclick = exportJSON;
+  ui.importBtn.onclick = importJSON;
+
+  // Seed with something useful
+  presetThrustJump();
+
+  // ---------- Initial draw ----------
+  redrawAll();
+  resetView();
+
+  // ---------- Small UX: re-simulate on enter in key fields ----------
+  ["mass","drag","gx","gy","dt","duration","p0x","p0y","v0x","v0y"].forEach(id=>{
+    byId(id).addEventListener("keydown", (e)=>{
+      if (e.key === "Enter") simulate();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
